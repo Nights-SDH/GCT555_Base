@@ -43,6 +43,7 @@ pip install -r requirements.txt
 The server requires specific MediaPipe models to function. A script is provided to download these models automatically.
 
 -   **Windows**: Run the `download_model.bat` file located in the `GCT555_Server` directory.
+-   **MacOS or Unix based OS**: Run the `download_model.sh` file located in the `GCT555_Server` directory.
 
 This will create a `models/` directory and download:
 -   `pose_landmarker_heavy.task`
