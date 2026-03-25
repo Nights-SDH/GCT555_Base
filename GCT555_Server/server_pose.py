@@ -9,8 +9,6 @@ from flask import Flask, Response
 
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
-from mediapipe.tasks.python.vision import drawing_utils
-from mediapipe.tasks.python.vision import drawing_styles
 
 #---------------------------
 from depth_module import DepthConfig, DepthState, build_pose_payload
@@ -19,8 +17,10 @@ depth_state = DepthState(
     DepthConfig(
         smoothing_alpha=0.35,
         pose_invert_world_z=False,
-        clamp_min=-5.0,
-        clamp_max=5.0,
+        face_global_scale=0.1,
+        face_invert_tz=False,
+        clamp_min=-20.0,
+        clamp_max=20.0,
     )
 )
 #---------------------------
@@ -30,38 +30,51 @@ SOCKET_HOST = '0.0.0.0'
 SOCKET_PORT = 5050
 WEB_PORT = 5000
 CAMERA_INDEX = 0
-DEBUG_MODE = False
+DEBUG_MODE = True
 MODEL_PATH = 'models/pose_landmarker_heavy.task'
+FACE_MODEL_PATH = 'models/face_landmarker.task'
 
 # Global variables to share data between threads
 current_frame = None
 current_landmarks_result = None
+current_face_result = None
 lock = threading.Lock()
+
+# Face detection thread shared state
+latest_rgb_frame = None
+latest_face_result = None
+face_lock = threading.Lock()
 
 # Initialize Flask
 app = Flask(__name__)
 
+def face_detect_thread(face_detector):
+    """Runs face detection in a separate thread using the latest RGB frame."""
+    global latest_face_result
+    while True:
+        frame = None
+        with face_lock:
+            if latest_rgb_frame is not None:
+                frame = latest_rgb_frame
+
+        if frame is not None:
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame)
+            result = face_detector.detect(mp_image)
+            if result and getattr(result, 'face_landmarks', None):
+                latest_face_result = result
+        else:
+            time.sleep(0.01)
+
 def draw_landmarks_on_image(rgb_image, detection_result):
-    pose_landmarks_list = detection_result.pose_landmarks
     annotated_image = np.copy(rgb_image)
+    height, width, _ = annotated_image.shape
 
-    # Note: drawing_styles.get_default_pose_landmarks_style() might be missing in some versions
-    # We can try to use it or define a custom one if it fails.
-    # The user provided snippet suggests it works.
-    try:
-        pose_landmark_style = drawing_styles.get_default_pose_landmarks_style()
-    except AttributeError:
-        pose_landmark_style = drawing_utils.DrawingSpec(color=(255, 255, 255), thickness=1)
-
-    pose_connection_style = drawing_utils.DrawingSpec(color=(0, 255, 0), thickness=2)
-
-    for pose_landmarks in pose_landmarks_list:
-        drawing_utils.draw_landmarks(
-            image=annotated_image,
-            landmark_list=pose_landmarks,
-            connections=vision.PoseLandmarksConnections.POSE_LANDMARKS,
-            landmark_drawing_spec=pose_landmark_style,
-            connection_drawing_spec=pose_connection_style)
+    if detection_result.pose_landmarks:
+        for pose_landmarks in detection_result.pose_landmarks:
+            for lm in pose_landmarks:
+                x = int(lm.x * width)
+                y = int(lm.y * height)
+                cv2.circle(annotated_image, (x, y), 3, (0, 255, 0), -1)
 
     return annotated_image
 
@@ -78,51 +91,30 @@ def socket_server_thread():
             print(f"[Socket] Connected by {addr}")
             try:
                 while True:
-                    global current_landmarks_result
+                    global current_landmarks_result, current_face_result
                     data_to_send = None
-                    
-                    #---------------------------------
-                    #with lock:
-                        #if current_landmarks_result and current_landmarks_result.pose_landmarks:
-                            ## Typically there's one pose, so we take the first list of landmarks
-                            #pose_landmarks = current_landmarks_result.pose_landmarks[0]
-                            
-                            #landmarks_list = []
-                            #for lm in pose_landmarks:
-                                #landmarks_list.append({
-                                    #'x': lm.x,
-                                    #'y': lm.y,
-                                    #'z': lm.z,
-                                    #'visibility': lm.visibility
-                                #})
-                            
-                            ## Also include world landmarks if needed?
-                            ## Unity usually wants normalized landmarks for 2D overlay or world landmarks for 3D?
-                            ## For "3D skeleton coordinates", pose_world_landmarks is better if available,
-                            ## but the standard pose_landmarks are normalized [0,1].
-                            ## detection_result.pose_world_landmarks provides meters-based coordinates.
-                            
-                            #world_landmarks_list = []
-                            #if current_landmarks_result.pose_world_landmarks:
-                                #for lm in current_landmarks_result.pose_world_landmarks[0]:
-                                    #world_landmarks_list.append({
-                                        #'x': lm.x,
-                                        #'y': lm.y,
-                                        #'z': lm.z,
-                                        #'visibility': lm.visibility
-                                    #})
 
-                            #data_to_send = json.dumps({
-                                #'landmarks': landmarks_list,
-                                #'world_landmarks': world_landmarks_list
-                            #})
-                    
                     with lock:
                         if current_landmarks_result and current_landmarks_result.pose_landmarks:
-                            pose_payload = build_pose_payload(current_landmarks_result, depth_state, pose_index=0)
+                            pose_payload = build_pose_payload(
+                                current_landmarks_result, depth_state,
+                                pose_index=0,
+                                face_result=current_face_result,
+                            )
                             if pose_payload is not None:
+                                ## DEBUG: print depth info
+                                #d = pose_payload.get('depth', {})
+                                #plz = d.get('per_landmark_z', [])
+                                #raw_tz = "N/A"
+                                #if current_face_result is not None:
+                                #    mats = getattr(current_face_result, 'facial_transformation_matrixes', None)
+                                #    if mats and len(mats) > 0:
+                                #        M = np.array(mats[0]).reshape(4,4)
+                                #        raw_tz = f"{float(M[2,3]):.2f}"
+                                #if plz:
+                                #    print(f"[Depth] mode={d.get('mode')} raw_tz={raw_tz} global_z={d.get('global_z'):.4f} "
+                                #          f"per_z min={min(plz):.4f} max={max(plz):.4f} spread={max(plz)-min(plz):.4f}")
                                 data_to_send = json.dumps(pose_payload)
-                    #---------------------------------
                     
                     if data_to_send:
                         # Send data followed by a newline as a delimiter
@@ -173,7 +165,7 @@ def index():
     return "<h1>MediaPipe Pose Server</h1><p><a href='/video_feed'>View Stream</a></p>"
 
 def main():
-    global current_frame, current_landmarks_result
+    global current_frame, current_landmarks_result, current_face_result
 
     # Start Socket Server thread
     t_socket = threading.Thread(target=socket_server_thread, daemon=True)
@@ -189,14 +181,27 @@ def main():
     options = vision.PoseLandmarkerOptions(
         base_options=base_options,
         output_segmentation_masks=False)
-    detector = vision.PoseLandmarker.create_from_options(options)
+    pose_detector = vision.PoseLandmarker.create_from_options(options)
+
+    # Set up MediaPipe Face Landmarker (for absolute depth via transformation matrix)
+    face_base_options = python.BaseOptions(model_asset_path=FACE_MODEL_PATH)
+    face_options = vision.FaceLandmarkerOptions(
+        base_options=face_base_options,
+        output_face_blendshapes=False,
+        output_facial_transformation_matrixes=True,
+        num_faces=1)
+    face_detector = vision.FaceLandmarker.create_from_options(face_options)
 
     # Video Capture
     cap = cv2.VideoCapture(CAMERA_INDEX)
-    
+
     if not cap.isOpened():
         print("Error: Could not open camera.")
         return
+
+    # Start face detection thread
+    t_face = threading.Thread(target=face_detect_thread, args=(face_detector,), daemon=True)
+    t_face.start()
 
     print("Starting Main Loop...")
     while cap.isOpened():
@@ -209,19 +214,23 @@ def main():
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=image)
 
-        # Detect pose landmarks
-        detection_result = detector.detect(mp_image)
+        # Share frame for face detection thread
+        with face_lock:
+            global latest_rgb_frame
+            latest_rgb_frame = image.copy()
 
-        # Process results
-        
+        # Detect pose landmarks
+        pose_result = pose_detector.detect(mp_image)
+
         # Create annotated image
-        annotated_image = draw_landmarks_on_image(image, detection_result)
-        
+        annotated_image = draw_landmarks_on_image(image, pose_result)
+
         # Convert back to BGR for OpenCV display and Streaming
         annotated_image_bgr = cv2.cvtColor(annotated_image, cv2.COLOR_RGB2BGR)
 
         with lock:
-            current_landmarks_result = detection_result
+            current_landmarks_result = pose_result
+            current_face_result = latest_face_result
             current_frame = annotated_image_bgr
 
         if DEBUG_MODE:

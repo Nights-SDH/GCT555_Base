@@ -76,6 +76,7 @@ public class StreamClient : MonoBehaviour
     private string latestJsonData = "";
     private List<GameObject> spawnedLandmarks = new List<GameObject>();
     public List<Landmark> activeLandmarks;
+    public PoseData latestPoseData;
 
     void Start()
     {
@@ -165,9 +166,10 @@ public class StreamClient : MonoBehaviour
                     PoseData pose = JsonUtility.FromJson<PoseData>(json);
                     if (pose != null)
                     {
+                        latestPoseData = pose;
                         //--------------------------
                         // Reverting to Hybrid/Normalized Visuals
-                        //UpdateHybridVisuals(pose.landmarks, pose.world_landmarks); 
+                        //UpdateHybridVisuals(pose.landmarks, pose.world_landmarks);
                         UpdateHybridVisuals(pose.landmarks, pose.world_landmarks, pose.depth);
                         //--------------------------
 

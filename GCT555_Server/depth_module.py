@@ -125,6 +125,7 @@ def build_pose_payload(
     result: Any,
     depth_state: DepthState,
     pose_index: int = 0,
+    face_result: Any = None,
 ) -> Optional[Dict[str, Any]]:
     """
     return :
@@ -132,11 +133,18 @@ def build_pose_payload(
       "landmarks": [...],
       "world_landmarks": [...],
       "depth": {
-        "mode": "pose_world",
+        "mode": "pose_face_abs" | "pose_world",
         "global_z": ...,
         "per_landmark_z": [...]
       }
     }
+
+    If face_result is provided and contains a facial transformation matrix,
+    global_z is derived from the face matrix tz (absolute depth).
+    Each per_landmark_z is then: global_z + (world_landmark_z - mean_world_z),
+    so pose world z acts as a relative offset from the absolute position.
+
+    Falls back to the old pose_world method if face_result is unavailable.
     """
     if not result or not getattr(result, "pose_landmarks", None):
         return None
@@ -150,33 +158,72 @@ def build_pose_payload(
     lm_list = [_safe_landmark_dict(lm) for lm in pose_landmarks]
     world_list = [_safe_landmark_dict(lm) for lm in world_landmarks]
 
-    global_z = _mean_z_from_world_landmarks(world_landmarks)
-    if global_z is None:
-        global_z = 0.0
+    # --- Try to get absolute depth from face transformation matrix ---
+    face_tz: Optional[float] = None
+    if face_result is not None:
+        matrices = getattr(face_result, "facial_transformation_matrixes", None)
+        if matrices is not None and len(matrices) > 0 and matrices[0] is not None:
+            M = _parse_4x4_matrix(matrices[0])
+            if M is not None:
+                face_tz = float(M[2, 3])
 
-    if depth_state.cfg.pose_invert_world_z:
-        global_z = -global_z
+    if face_tz is not None:
+        # ---- Face-based absolute depth mode ----
+        global_z = face_tz
+        if depth_state.cfg.face_invert_tz:
+            global_z = -global_z
+        global_z *= depth_state.cfg.face_global_scale
+        global_z = _clamp(global_z, depth_state.cfg.clamp_min, depth_state.cfg.clamp_max)
+        global_z = depth_state._smooth(depth_state._pose_global_z, pose_index, global_z)
 
-    global_z = _clamp(global_z, depth_state.cfg.clamp_min, depth_state.cfg.clamp_max)
-    global_z = depth_state._smooth(depth_state._pose_global_z, pose_index, global_z)
+        # Pose world z as relative offset from mean
+        mean_wz = _mean_z_from_world_landmarks(world_landmarks)
+        if mean_wz is None:
+            mean_wz = 0.0
 
-    per_landmark_z = []
-    if world_landmarks:
-        for lm in world_landmarks:
-            z = float(getattr(lm, "z", 0.0))
-            if depth_state.cfg.pose_invert_world_z:
-                z = -z
-            per_landmark_z.append(_clamp(z, depth_state.cfg.clamp_min, depth_state.cfg.clamp_max))
+        per_landmark_z = []
+        if world_landmarks:
+            for lm in world_landmarks:
+                rel_z = float(getattr(lm, "z", 0.0)) - mean_wz
+                if depth_state.cfg.pose_invert_world_z:
+                    rel_z = -rel_z
+                z = global_z + rel_z
+                per_landmark_z.append(_clamp(z, depth_state.cfg.clamp_min, depth_state.cfg.clamp_max))
+        else:
+            for lm in pose_landmarks:
+                per_landmark_z.append(global_z)
+
+        mode = "pose_face_abs"
     else:
-        # fallback: normalized z
-        for lm in pose_landmarks:
-            per_landmark_z.append(float(getattr(lm, "z", 0.0)))
+        # ---- Fallback: old pose_world mode ----
+        global_z = _mean_z_from_world_landmarks(world_landmarks)
+        if global_z is None:
+            global_z = 0.0
+
+        if depth_state.cfg.pose_invert_world_z:
+            global_z = -global_z
+
+        global_z = _clamp(global_z, depth_state.cfg.clamp_min, depth_state.cfg.clamp_max)
+        global_z = depth_state._smooth(depth_state._pose_global_z, pose_index, global_z)
+
+        per_landmark_z = []
+        if world_landmarks:
+            for lm in world_landmarks:
+                z = float(getattr(lm, "z", 0.0))
+                if depth_state.cfg.pose_invert_world_z:
+                    z = -z
+                per_landmark_z.append(_clamp(z, depth_state.cfg.clamp_min, depth_state.cfg.clamp_max))
+        else:
+            for lm in pose_landmarks:
+                per_landmark_z.append(float(getattr(lm, "z", 0.0)))
+
+        mode = "pose_world"
 
     payload = {
         "landmarks": lm_list,
         "world_landmarks": world_list,
         "depth": {
-            "mode": "pose_world",
+            "mode": mode,
             "global_z": global_z,
             "per_landmark_z": per_landmark_z,
         }
