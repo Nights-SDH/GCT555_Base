@@ -84,6 +84,7 @@ public class PoseData
 public class Hand
 {
     public string handedness;
+    public string gesture;
     public List<Landmark> landmarks;
     public List<Landmark> world_landmarks;
     public DepthInfo depth;

@@ -77,6 +77,7 @@ public class StreamClient : MonoBehaviour
     private List<GameObject> spawnedLandmarks = new List<GameObject>();
     public List<Landmark> activeLandmarks;
     public PoseData latestPoseData;
+    public string currentGesture = "None";
 
     void Start()
     {
@@ -210,6 +211,8 @@ public class StreamClient : MonoBehaviour
 
                         foreach (var hand in handData.hands)
                         {
+                            currentGesture = hand.gesture;
+                            
                             if (hand.landmarks != null)
                                 allNorm.AddRange(hand.landmarks);
 

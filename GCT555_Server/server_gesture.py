@@ -12,6 +12,7 @@ from mediapipe.tasks.python import vision
 
 #---------------------------
 from depth_module import DepthConfig, DepthState, build_hand_payloads
+from gesture_module import detect_custom_gesture
 
 depth_state = DepthState(
     DepthConfig(
@@ -93,11 +94,19 @@ def draw_landmarks_on_image(rgb_image, detection_result):
         wrist_px = (int(wrist.x * width), int(wrist.y * height))
 
         gesture_label = "unknown"
-        if detection_result.gestures and hand_idx < len(detection_result.gestures):
-            gestures = detection_result.gestures[hand_idx]
-            if gestures:
-                raw_label = gestures[0].category_name
-                gesture_label = GESTURE_DISPLAY.get(raw_label, raw_label)
+
+        custom_gesture = detect_custom_gesture(hand_landmarks)
+        if custom_gesture:
+            gesture_label = custom_gesture
+        else:
+            if detection_result.gestures and hand_idx < len(detection_result.gestures):
+                gestures = detection_result.gestures[hand_idx]
+                if gestures:
+                    raw_label = gestures[0].category_name
+                    gesture_label = GESTURE_DISPLAY.get(raw_label, raw_label)
+
+        if gesture_label.startswith("Custom_"):
+            gesture_label = gesture_label.replace("Custom_", "") + " (Custom)"
 
         cv2.putText(
             annotated_image,
@@ -127,11 +136,16 @@ def build_gesture_hand_payloads(gesture_result, depth_state):
         gesture_label = "unknown"
         confidence = 0.0
 
-        if gesture_result.gestures and idx < len(gesture_result.gestures):
-            gestures = gesture_result.gestures[idx]
-            if gestures:
-                gesture_label = gestures[0].category_name
-                confidence = round(float(gestures[0].score), 3)
+        custom_gesture = detect_custom_gesture(gesture_result.hand_landmarks[idx])
+        if custom_gesture:
+            gesture_label = custom_gesture
+            confidence = 1.0 
+        else:
+            if gesture_result.gestures and idx < len(gesture_result.gestures):
+                gestures = gesture_result.gestures[idx]
+                if gestures:
+                    gesture_label = gestures[0].category_name
+                    confidence = round(float(gestures[0].score), 3)
 
         payload["gesture"] = gesture_label
         payload["gesture_confidence"] = confidence

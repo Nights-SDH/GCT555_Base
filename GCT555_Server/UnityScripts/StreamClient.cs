@@ -36,6 +36,7 @@ public class StreamClient : MonoBehaviour
     private string latestJsonData = "";
     private List<GameObject> spawnedLandmarks = new List<GameObject>();
     public List<Landmark> activeLandmarks;
+    public string currentGesture = "none";
 
     void Start()
     {
@@ -137,6 +138,7 @@ public class StreamClient : MonoBehaviour
                         
                         foreach(var hand in handData.hands)
                         {
+                            currentGesture = hand.gesture;
                             allNorm.AddRange(hand.landmarks);
                              // If world exists, add it, otherwise fill with nulls to stay consistent index-wise
                             if (hand.world_landmarks != null && hand.world_landmarks.Count > 0)
