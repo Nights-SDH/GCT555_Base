@@ -10,6 +10,9 @@ powershell -Command "Invoke-WebRequest -Uri 'https://storage.googleapis.com/medi
 echo Downloading face_landmarker.task...
 powershell -Command "Invoke-WebRequest -Uri 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task' -OutFile 'models/face_landmarker.task'"
 
+echo Downloading gesture_recognizer.task...
+powershell -Command "Invoke-WebRequest -Uri 'https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task' -OutFile 'models/gesture_recognizer.task'"
+
 if %errorlevel% neq 0 (
     echo A download failed!
     pause
