@@ -20,5 +20,10 @@ def detect_custom_gesture(landmarks):
     if not thumb_is_open and not index_is_open and middle_is_open and not ring_is_open and not pinky_is_open:
         return "Custom_MiddleFinger"
 
+    # 4. Custom Gesture: "Rock" shape 🤘
+    # Index and pinky are open, while middle and ring are folded (thumb optional)
+    if index_is_open and pinky_is_open and not middle_is_open and not ring_is_open and not thumb_is_open:
+        return "Custom_Rock"
+
     # Return None if it doesn't match any custom gestures
     return None
