@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C \"c:\\\\Users\\\\sdwqa\\\\Documents\\\\SDH\\\\KAIST\\\\1학년 2학기\\\\3D 인터렉션\\\\GCT555_Base\\\\GCT555_Server\" log --oneline -10)",
+      "Bash(git -C \"c:\\\\Users\\\\sdwqa\\\\Documents\\\\SDH\\\\KAIST\\\\1학년 2학기\\\\3D 인터렉션\\\\GCT555_Base\\\\GCT555_Server\" config --list)"
+    ]
+  }
+}
