@@ -78,6 +78,11 @@ public class StreamClient : MonoBehaviour
     public List<Landmark> activeLandmarks;
     public PoseData latestPoseData;
     public string currentGesture = "None";
+    public string handedness = "left";
+    public string leftGesture = "None";
+    public string rightGesture = "None";
+    public List<Landmark> leftLandmarks;
+    public List<Landmark> rightLandmarks;
 
     void Start()
     {
@@ -209,10 +214,24 @@ public class StreamClient : MonoBehaviour
                         float globalZSum = 0f;
                         int globalZCount = 0;
 
+                        leftGesture = "None";  leftLandmarks = null;
+                        rightGesture = "None"; rightLandmarks = null;
                         foreach (var hand in handData.hands)
                         {
                             currentGesture = hand.gesture;
-                            
+                            handedness = hand.handedness;
+
+                            if (hand.handedness == "Left")
+                            { 
+                                leftGesture = hand.gesture;  
+                                leftLandmarks = hand.landmarks; 
+                            }
+                            else if (hand.handedness == "Right")
+                            { 
+                                rightGesture = hand.gesture; 
+                                rightLandmarks = hand.landmarks;
+                            }
+
                             if (hand.landmarks != null)
                                 allNorm.AddRange(hand.landmarks);
 

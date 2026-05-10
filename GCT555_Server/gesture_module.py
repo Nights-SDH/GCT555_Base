@@ -1,6 +1,9 @@
-def detect_custom_gesture(landmarks):
+def detect_custom_gesture(landmarks, handedness=None):
     def get_dist(lm1, lm2):
         return ((lm1.x - lm2.x)**2 + (lm1.y - lm2.y)**2)**0.5
+
+    def get_dist_3d(lm1, lm2):
+        return ((lm1.x - lm2.x)**2 + (lm1.y - lm2.y)**2 + (lm1.z - lm2.z)**2)**0.5
 
     # 1. Check if the four fingers are open (distance to wrist)
     # This works regardless of hand rotation (e.g., pointing horizontally)
@@ -12,18 +15,36 @@ def detect_custom_gesture(landmarks):
     # 2. Check if the thumb is open using distance
     thumb_is_open = get_dist(landmarks[4], landmarks[17]) > get_dist(landmarks[2], landmarks[17])
 
-    # 3. Custom Gesture: "Gun" shape 🔫
-    # Only thumb and index are open, while the rest are folded!
-    if thumb_is_open and index_is_open and not middle_is_open and not ring_is_open and not pinky_is_open:
-        return "Custom_Gun"
-    
-    if not thumb_is_open and not index_is_open and middle_is_open and not ring_is_open and not pinky_is_open:
-        return "Custom_MiddleFinger"
+    # 3. Pinch detection: normalize thumb-to-fingertip distance by hand scale (wrist → middle MCP)
+    hand_scale = get_dist(landmarks[0], landmarks[9])
+    pinch_threshold = hand_scale * 0.7
+    thumb_index_pinch = get_dist(landmarks[4], landmarks[8]) < pinch_threshold
+    thumb_middle_pinch = get_dist(landmarks[4], landmarks[12]) < pinch_threshold
 
-    # 4. Custom Gesture: "Rock" shape 🤘
-    # Index and pinky are open, while middle and ring are folded (thumb optional)
-    if index_is_open and pinky_is_open and not middle_is_open and not ring_is_open and not thumb_is_open:
-        return "Custom_Rock"
+    if handedness == "Left":
+        # 4. Left: thumb + index pinching, middle/ring/pinky extended
+        if thumb_index_pinch and middle_is_open and ring_is_open and pinky_is_open:
+            return "Left_Pinch_Second"
 
-    # Return None if it doesn't match any custom gestures
+        # 5. Left: thumb + middle pinching, index/ring/pinky extended
+        if thumb_middle_pinch and index_is_open and ring_is_open and pinky_is_open:
+            return "Left_Pinch_Middle"
+
+    elif handedness == "Right":
+        # 6. Right: thumb and index tips touching
+        if get_dist_3d(landmarks[4], landmarks[8]) < pinch_threshold/4:
+            return "Right_Grab"
+
+        # 7. Right: all fingers extended
+        if thumb_is_open and index_is_open and middle_is_open and ring_is_open and pinky_is_open:
+            return "Right_Release"
+        # Hand-agnostic gestures
+    # if thumb_is_open and index_is_open and not middle_is_open and not ring_is_open and not pinky_is_open:
+    #     return "Custom_Gun"
+
+    # if not thumb_is_open and not index_is_open and middle_is_open and not ring_is_open and not pinky_is_open:
+    #     return "Custom_MiddleFinger"
+
+    # if index_is_open and pinky_is_open and not middle_is_open and not ring_is_open and not thumb_is_open:
+    #     return "Custom_Rock"
     return None

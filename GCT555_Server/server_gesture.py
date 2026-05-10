@@ -30,6 +30,7 @@ SOCKET_PORT = 5051
 WEB_PORT = 5001
 CAMERA_INDEX = 0
 DEBUG_MODE = True
+FLIP_CAMERA = True
 MODEL_PATH = 'models/gesture_recognizer.task'
 
 # Global variables to share data between threads
@@ -60,6 +61,14 @@ GESTURE_DISPLAY = {
     "Victory":      "Peace / V",
     "ILoveYou":     "I Love You",
 }
+
+
+def _swap_hand(label):
+    if not FLIP_CAMERA:
+        return label
+    if label == "Left": return "Right"
+    if label == "Right": return "Left"
+    return label
 
 
 def draw_landmarks_on_image(rgb_image, detection_result):
@@ -95,18 +104,19 @@ def draw_landmarks_on_image(rgb_image, detection_result):
 
         gesture_label = "unknown"
 
-        custom_gesture = detect_custom_gesture(hand_landmarks)
+        handedness_label = "Unknown"
+        if detection_result.handedness and hand_idx < len(detection_result.handedness):
+            handedness_label = _swap_hand(detection_result.handedness[hand_idx][0].category_name)
+
+        custom_gesture = detect_custom_gesture(hand_landmarks, handedness_label)
         if custom_gesture:
-            gesture_label = custom_gesture
+            gesture_label = custom_gesture + " (Custom)"
         else:
             if detection_result.gestures and hand_idx < len(detection_result.gestures):
                 gestures = detection_result.gestures[hand_idx]
                 if gestures:
                     raw_label = gestures[0].category_name
                     gesture_label = GESTURE_DISPLAY.get(raw_label, raw_label)
-
-        if gesture_label.startswith("Custom_"):
-            gesture_label = gesture_label.replace("Custom_", "") + " (Custom)"
 
         cv2.putText(
             annotated_image,
@@ -136,10 +146,12 @@ def build_gesture_hand_payloads(gesture_result, depth_state):
         gesture_label = "unknown"
         confidence = 0.0
 
-        custom_gesture = detect_custom_gesture(gesture_result.hand_landmarks[idx])
+        hand_label = _swap_hand(gesture_result.handedness[idx][0].category_name) if gesture_result.handedness and idx < len(gesture_result.handedness) else None
+        payload["handedness"] = hand_label or "Unknown"
+        custom_gesture = detect_custom_gesture(gesture_result.hand_landmarks[idx], hand_label)
         if custom_gesture:
             gesture_label = custom_gesture
-            confidence = 1.0 
+            confidence = 1.0
         else:
             if gesture_result.gestures and idx < len(gesture_result.gestures):
                 gestures = gesture_result.gestures[idx]
@@ -151,6 +163,36 @@ def build_gesture_hand_payloads(gesture_result, depth_state):
         payload["gesture_confidence"] = confidence
 
     return hand_payloads
+
+
+def build_gesture_hand_payloads_left(gesture_result, depth_state):
+    """Same as build_gesture_hand_payloads but only returns Left hand payloads."""
+    if not gesture_result or not gesture_result.hand_landmarks:
+        return []
+
+    hand_payloads = build_hand_payloads(gesture_result, depth_state)
+
+    for idx, payload in enumerate(hand_payloads):
+        gesture_label = "unknown"
+        confidence = 0.0
+
+        hand_label = _swap_hand(gesture_result.handedness[idx][0].category_name) if gesture_result.handedness and idx < len(gesture_result.handedness) else None
+        payload["handedness"] = hand_label or "Unknown"
+        custom_gesture = detect_custom_gesture(gesture_result.hand_landmarks[idx], hand_label)
+        if custom_gesture:
+            gesture_label = custom_gesture
+            confidence = 1.0
+        else:
+            if gesture_result.gestures and idx < len(gesture_result.gestures):
+                gestures = gesture_result.gestures[idx]
+                if gestures:
+                    gesture_label = gestures[0].category_name
+                    confidence = round(float(gestures[0].score), 3)
+
+        payload["gesture"] = gesture_label
+        payload["gesture_confidence"] = confidence
+
+    return [p for p in hand_payloads if p.get("handedness") == "Left"]
 
 
 def socket_server_thread():
@@ -261,6 +303,8 @@ def main():
             print("Ignoring empty camera frame.")
             continue
 
+        if FLIP_CAMERA:
+            image = cv2.flip(image, 1)
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=image)
 
